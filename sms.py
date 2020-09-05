@@ -1,25 +1,36 @@
-import pickle
 import os
 from time import sleep
 from selenium import webdriver
+from selenium.webdriver.firefox.options import Options
+from bs4 import BeautifulSoup as bs
 import json
 import requests
-import credentials
 
 class SMS:
     """Objet to interact with Orange Private API to send text messages.
     The username and password of the Orange account are to be specified in
-    a seperate credentials.py file."""
+    a seperate credentials.json file."""
 
     def __init__(self):
-        self.login = credentials.login
-        self.password = credentials.password
 
         if os.path.isfile('cookies.ck'):
-            with open('cookies.ck','rb') as f:
-                wassup = pickle.Unpickler(f).load()
+            with open('cookies.ck','r') as f:
+                wassup = f.read()
                 self.cookies = {"wassup":wassup}
         else:
+            if os.path.isfile('credentials.json'):
+                with open("credentials.json","r") as f:
+                    credentials = str()
+                    for i in f:
+                        credentials += i
+                    credentials = json.loads(credentials)
+                    self.login = credentials["username"]
+                    self.password = credentials["password"]
+                if self.login == "" or self.password == "":
+                    raise Exception("Please fill in your username and password in credentials.json accordingly.")
+            else:
+                raise FileNotFoundError("No credentials.json file found.")
+
             self.cookies = self._authenticate()
 
         self.headers = {
@@ -37,6 +48,7 @@ class SMS:
                 'Referer':'https://smsmms.orange.fr/',
                 'User-Agent':'Mozilla/5.0 (X11; Linux x86_64; rv:76.0) Gecko/20100101 Firefox/76.0'
                 }
+
         self.default_message = '''
         {
                 "type": "xms",
@@ -52,16 +64,40 @@ class SMS:
     def _authenticate(self):
         """Returns the cookie/token which will be later used in the API."""
 
-        driver = webdriver.Firefox()
+        print("Beginning authentification...")
+
+        options = Options()
+        options.headless = True
+        driver = webdriver.Firefox(options=options)
         driver.get("https://login.orange.fr/?return_url=https%3A%2F%2Fsmsmms.orange.fr&redirect=false")
-        while "captcha" in driver.current_url: pass
         sleep(2)
+
+        # TODO
+        # if "captcha" in driver.page_source:
+        #     input()
+        #     driver.close()
+        #     driver = webdriver.Firefox()
+        #     print("Complete the captcha.")
+        #     while "captcha" in driver.current_url: pass
+
         driver.find_element_by_id("login").send_keys(self.login)
         driver.find_element_by_id("btnSubmit").click()
+
+        sleep(1)
+        soup = bs(driver.page_source,"lxml")
+        error = soup.find("h6",{"role":"alert"}).text
+        if error:
+            raise Exception("Wrong username.")
         sleep(2)
+
         driver.find_element_by_id("password").send_keys(self.password)
         driver.find_element_by_id("btnSubmit").click()
-        print("Veuillez utiliser la page web quelques instants...")
+        sleep(2)
+        if "alert" in driver.page_source:
+            raise Exception("Wrong password.")
+
+        print("Finishing authentification...")
+
         done = False
         while not done:
             cookies = driver.get_cookies()
@@ -71,6 +107,11 @@ class SMS:
                     done = True
                     break
         driver.close()
+        print("Done!")
+
+        with open("cookies.ck","w") as f:
+            f.write(wassup)
+
         return {"wassup":wassup}
 
     def check_phone_number(self,num):
@@ -83,7 +124,7 @@ class SMS:
 
     def send(self,phone_number,message):
         """Send a text message to phone_number.
-        Returns a bool indicating weither it failed or not"""
+        Returns a bool indicating whether it failed or not"""
         phone_number = self.check_phone_number(phone_number)
         to_send = json.loads(self.default_message)
         to_send['content'] = str(message)
