@@ -8,6 +8,8 @@ from selenium import webdriver
 from selenium.webdriver.firefox.options import Options
 from bs4 import BeautifulSoup as bs
 
+class CredentialsException(Exception):
+    pass
 
 class SMS:
     """
@@ -29,7 +31,7 @@ class SMS:
                     self.login = credentials["username"]
                     self.password = credentials["password"]
                 if self.login == "" or self.password == "":
-                    raise Exception("Please fill in your username and password in credentials.json accordingly.")
+                    raise CredentialsException("Please fill in your username and password in credentials.json accordingly.")
             else:
                 raise FileNotFoundError("No credentials.json file found.")
 
