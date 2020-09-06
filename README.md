@@ -9,7 +9,8 @@ To run this object, you will have to pip install these packages:
 * json
 * requests
 * selenium
-* bs4  
+* bs4
+
 You will also have to install geckodriver and firefox.  
 On ArchLinux, just type:
 ```
