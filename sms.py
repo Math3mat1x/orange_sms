@@ -50,7 +50,7 @@ class SMS:
                 raise FileNotFoundError("No credentials.json file found.")
 
             # Creation of the cookie file after a check of credentials.json.
-            self.headers.update(_authenticate())
+            self.headers.update(self._authenticate())
 
 
     def _authenticate(self):
