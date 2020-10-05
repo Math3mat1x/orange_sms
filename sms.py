@@ -2,6 +2,8 @@ import os
 
 import json
 from time import sleep
+import time
+import datetime
 
 import requests
 from selenium import webdriver
@@ -17,17 +19,29 @@ class SMS:
     """
 
     def __init__(self):
-        if os.path.isfile('cookies.ck'):
-            with open('cookies.ck','r') as f:
-                wassup = f.read()
-                self.cookies = {"wassup":wassup}
-        else: # no cookie stored
+
+        self.headers = {
+                "x-xms-service-id":"OMI",
+                "content-type":"application/json"
+                }
+
+        self.default_message = '''
+        {
+            "content":"message",
+            "recipients": ["phone_numbre"],
+            "replyType": "mobile",
+            "messageId": "0"
+        }
+        '''
+
+        if os.path.isfile('token.txt'):
+            with open('token.txt','r') as f:
+                token, self.expires = [i if e != 0 else i[:-1] for e,i in enumerate(f)]
+                self.headers.update({"authorization":"Bearer " + token})
+        else: # token not stored
             if os.path.isfile('credentials.json'):
                 with open("credentials.json","r") as f:
-                    credentials = str()
-                    for i in f:
-                        credentials += i
-                    credentials = json.loads(credentials)
+                    credentials = json.loads("\n".join([i for i in f]))
                     self.login = credentials["username"]
                     self.password = credentials["password"]
                 if self.login == "" or self.password == "":
@@ -36,43 +50,16 @@ class SMS:
                 raise FileNotFoundError("No credentials.json file found.")
 
             # Creation of the cookie file after a check of credentials.json.
-            self.cookies = self._authenticate()
+            self.headers.update(_authenticate())
 
-        self.headers = {
-                'Host':'smsmms.orange.fr',
-                'Accept':'application/json; charset=utf8',
-                'Accept-Language':'en-US,en;q=0.5',
-                'Accept-Encoding':'gzip, deflate, br',
-                'Content-Type':'application/json',
-                'Cache-Control':'no-cache',
-                'Pragma':'no-cache',
-                'If-None-Match':'0',
-                'Content-Length':'132',
-                'Origin':'https://smsmms.orange.fr',
-                'Connection':'keep-alive',
-                'Referer':'https://smsmms.orange.fr/',
-                'User-Agent':'Mozilla/5.0 (X11; Linux x86_64; rv:76.0) Gecko/20100101 Firefox/76.0'
-                }
-
-        self.default_message = '''
-        {
-                "type": "xms",
-                "messageId": 0,
-                "content": "message",
-                "replyType": "on_mobile",
-                "recipients": ["phone_number"],
-                "attachments": [],
-                "mmsData": ""
-        }
-        '''
 
     def _authenticate(self):
         """
         Generation of the cookie that unables authentification into the API.
-        The function creates a file named cookies.ck containing the cookie.
+        The function creates a file named token.txt containing the token and its expiracy timestamp.
 
         Returns:
-            cookie (dict): The cookie in order to authenticate.
+            header (dict): The token in order to authenticate.
         """
 
         print("Beginning authentification...")
@@ -84,13 +71,13 @@ class SMS:
         driver.get("https://login.orange.fr/?return_url=https%3A%2F%2Fsmsmms.orange.fr&redirect=false")
         sleep(2)
 
-        # TODO
-        # if "captcha" in driver.page_source:
-        #     input()
-        #     driver.close()
-        #     driver = webdriver.Firefox()
-        #     print("Complete the captcha.")
-        #     while "captcha" in driver.current_url: pass
+        soup = bs(driver.page_source,"lxml")
+        if soup.find("div",{"id":"captchaRow"}):
+            driver.close()
+            driver = webdriver.Firefox()
+            driver.get("https://login.orange.fr/?return_url=https%3A%2F%2Fsmsmms.orange.fr&redirect=false")
+            input("Press enter when you completed the captcha")
+            sleep(2)
 
         driver.find_element_by_id("login").send_keys(self.login)
         driver.find_element_by_id("btnSubmit").click()
@@ -108,28 +95,40 @@ class SMS:
 
         # check the password
         sleep(2)
-        if "alert" in driver.page_source:
+        soup = bs(driver.page_source,"lxml")
+        if soup.find("input",{"id":"password"}):
             raise Exception("Wrong password.")
 
         print("Finishing authentification...")
+
         done = False
         while not done:
             cookies = driver.get_cookies()
             for i in cookies:
-                if "wassup" == i['name']:
-                    wassup = i['value']
+                if "wassup" == i["name"]:
+                    wassup = i["value"]
                     done = True
                     break
 
         driver.close()
+        
+        token = requests.get("https://api.webxms.orange.fr/api/v8/token",\
+                             cookies={"wassup":wassup},headers=self.headers)
+        token = json.loads(token.text)
         print("Done!")
 
-        with open("cookies.ck","w") as f:
-            f.write(wassup)
+        with open("token.txt","w") as f:
+            f.write(token["token"] + "\n")
+            # Date conversion to timestamp
+            date = token["expires"]
+            date = [int(i) for i in date.split("T")[0].split("-")]
+            f.write(str(time.mktime(datetime.datetime(\
+                    date[0], date[1], date[2]-1).timetuple())))
 
-        return {"wassup":wassup}
+        self.expires = token["expires"]
+        return {"authorization":"Bearer " + token["token"]}
 
-    def check_phone_number(self,num):
+    def check_phone_number(self, num):
         """Converts the phone number.
         
         Args:
@@ -145,7 +144,7 @@ class SMS:
         return "+33" + num[1:]
 
 
-    def send(self,phone_number,message):
+    def send(self, phone_number, message):
         """Send a text message to phone_number.
 
         Args:
@@ -162,7 +161,8 @@ class SMS:
         to_send['recipients'] = [phone_number]
         message = json.dumps(to_send)
 
-        r = requests.post("https://smsmms.orange.fr/api/v1/messages",headers=self.headers,cookies=self.cookies,data=message)
+        r = requests.post("https://api.webxms.orange.fr/api/v8/users/me/messages", data=message, headers=self.headers)
+
         if r.ok:
             return True
         else:
