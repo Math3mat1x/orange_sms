@@ -11,9 +11,9 @@ from selenium.webdriver.firefox.options import Options
 from bs4 import BeautifulSoup as bs
 
 class CredentialsException(Exception):
-    pass
+    """A (useless?) exception class."""
 
-class SMS:
+class SMS():
     """
     Simple object to send an SMS using the Orange SMS API.
     """
@@ -34,18 +34,22 @@ class SMS:
         }
         '''
 
+        self.login_page_url = "https://login.orange.fr/?return_url=https%3A%2F%2Fsmsmms.orange.fr&redirect=false"
+
         if os.path.isfile('token.txt'):
-            with open('token.txt','r') as f:
-                token, self.expires = [i if e != 0 else i[:-1] for e,i in enumerate(f)]
+            with open('token.txt','r') as rows:
+                token, self.expires = [i if e != 0 else i[:-1] for e,i in enumerate(rows)]
                 self.headers.update({"authorization":"Bearer " + token})
         else: # token not stored
             if os.path.isfile('credentials.json'):
-                with open("credentials.json","r") as f:
-                    credentials = json.loads("\n".join([i for i in f]))
+                with open("credentials.json","r") as parts:
+                    credentials = json.loads("\n".join(parts))
                     self.login = credentials["username"]
                     self.password = credentials["password"]
                 if self.login == "" or self.password == "":
-                    raise CredentialsException("Please fill in your username and password in credentials.json accordingly.")
+                    error = "Please fill in your username and password in\
+                            credentials.json accordingly."
+                    raise CredentialsException(error)
             else:
                 raise FileNotFoundError("No credentials.json file found.")
 
@@ -68,14 +72,14 @@ class SMS:
         options = Options()
         options.headless = True
         driver = webdriver.Firefox(options=options)
-        driver.get("https://login.orange.fr/?return_url=https%3A%2F%2Fsmsmms.orange.fr&redirect=false")
+        driver.get(self.login_page_url)
         sleep(2)
 
         soup = bs(driver.page_source,"lxml")
         if soup.find("div",{"id":"captchaRow"}):
             driver.close()
             driver = webdriver.Firefox()
-            driver.get("https://login.orange.fr/?return_url=https%3A%2F%2Fsmsmms.orange.fr&redirect=false")
+            driver.get(self.login_page_url)
             input("Press enter when you completed the captcha")
             sleep(2)
 
@@ -105,13 +109,13 @@ class SMS:
         while not done:
             cookies = driver.get_cookies()
             for i in cookies:
-                if "wassup" == i["name"]:
+                if i["name"] == "wassup":
                     wassup = i["value"]
                     done = True
                     break
 
         driver.close()
-        
+
         token = requests.get("https://api.webxms.orange.fr/api/v8/token",\
                              cookies={"wassup":wassup},headers=self.headers)
         token = json.loads(token.text)
@@ -128,22 +132,6 @@ class SMS:
         self.expires = token["expires"]
         return {"authorization":"Bearer " + token["token"]}
 
-    def check_phone_number(self, num):
-        """Converts the phone number.
-        
-        Args:
-            num (str): the french phone number.
-
-        Returns:
-            num (str): the phone number formatted.
-
-        Todo:
-            Support for phone numbers outside of France.
-        """
-
-        return "+33" + num[1:]
-
-
     def send(self, phone_number, message):
         """Send a text message to phone_number.
 
@@ -155,15 +143,13 @@ class SMS:
             success (bool): has the sms been sent?
         """
 
-        phone_number = self.check_phone_number(phone_number)
+        phone_number = "+33" + phone_number[1:]
         to_send = json.loads(self.default_message)
         to_send['content'] = str(message)
         to_send['recipients'] = [phone_number]
         message = json.dumps(to_send)
+        api_url = "https://api.webxms.orange.fr/api/v8/users/me/messages"
 
-        r = requests.post("https://api.webxms.orange.fr/api/v8/users/me/messages", data=message, headers=self.headers)
+        res = requests.post(api_url, data=message, headers=self.headers)
 
-        if r.ok:
-            return True
-        else:
-            return False
+        return bool(res.ok)
