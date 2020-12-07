@@ -1,4 +1,5 @@
 # orange_sms
+![Logo](logo.png)
 Easy to use Python object to send SMS using the smsmms.orange.fr tool.
 ## Table of contents
 * [Installation](#installation)
