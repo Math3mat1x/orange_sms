@@ -10,7 +10,7 @@ from selenium import webdriver
 from selenium.webdriver.firefox.options import Options
 from bs4 import BeautifulSoup as bs
 
-class CredentialsException(Exception):
+class NoCredentialsError(Exception):
     """A (useless?) exception class."""
 
 class SMS():
@@ -18,7 +18,7 @@ class SMS():
     Simple object to send an SMS using the Orange SMS API.
     """
 
-    def __init__(self):
+    def __init__(self, username=str(), password=str()):
 
         self.headers = {
                 "x-xms-service-id":"OMI",
@@ -36,22 +36,20 @@ class SMS():
 
         self.login_page_url = "https://login.orange.fr/?return_url=https%3A%2F%2Fsmsmms.orange.fr&redirect=false"
 
-        if os.path.isfile('token.txt'):
-            with open('token.txt','r') as rows:
+        basedir = os.path.abspath(os.path.dirname(__file__))
+        self.token_file = os.path.join(basedir, "token.txt")
+
+        if os.path.isfile(self.token_file):
+            with open(self.token_file,'r') as rows:
                 token, self.expires = [i if e != 0 else i[:-1] for e,i in enumerate(rows)]
                 self.headers.update({"authorization":"Bearer " + token})
         else: # token not stored
-            if os.path.isfile('credentials.json'):
-                with open("credentials.json","r") as parts:
-                    credentials = json.loads("\n".join(parts))
-                    self.login = credentials["username"]
-                    self.password = credentials["password"]
-                if self.login == "" or self.password == "":
-                    error = "Please fill in your username and password in\
-                            credentials.json accordingly."
-                    raise CredentialsException(error)
+            if username and password:
+                self.login = username
+                self.password = password
             else:
-                raise FileNotFoundError("No credentials.json file found.")
+                error = "On the first run, username and password arguments have to be provided."
+                raise NoCredentialsError(error)
 
             # Creation of the cookie file after a check of credentials.json.
             self.headers.update(self._authenticate())
@@ -121,7 +119,7 @@ class SMS():
         token = json.loads(token.text)
         print("Done!")
 
-        with open("token.txt","w") as f:
+        with open(self.token_file,"w") as f:
             f.write(token["token"] + "\n")
             # Date conversion to timestamp
             date = token["expires"]
